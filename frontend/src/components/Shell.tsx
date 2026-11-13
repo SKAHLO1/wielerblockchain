@@ -51,7 +51,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   return (
     <div className="app">
       <Sidebar open={open} />
-      {open && <div className="sidebar-scrim" onClick={() => setOpen(false)} />}
+      {open && <div className="app-sidebar-scrim" onClick={() => setOpen(false)} />}
       <main className="main">
         <Header onMenu={() => setOpen((o) => !o)} />
         <DeployNotice />
@@ -75,7 +75,7 @@ function Sidebar({ open }: { open: boolean }) {
   const path = usePathname();
   const { accountId, signIn, signOut } = useWallet();
   return (
-    <aside className={`sidebar ${open ? 'open' : ''}`}>
+    <aside className={`app-sidebar ${open ? 'open' : ''}`}>
       <Link href="/" className="brand" aria-label="WIELER home">
         <img src="/images/logo.svg" alt="" width={86} height={58} />
         <span>WIELER</span>
@@ -103,7 +103,7 @@ function Sidebar({ open }: { open: boolean }) {
           <span>Connect Wallet</span>
         </button>
       )}
-      <div className="sidebar-mountains" aria-hidden />
+      <div className="app-sidebar-mountains" aria-hidden />
     </aside>
   );
 }
