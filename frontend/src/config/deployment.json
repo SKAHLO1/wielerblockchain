@@ -1,0 +1,8 @@
+{
+  "networkId": "testnet",
+  "nodeUrl": "https://test.rpc.fastnear.com",
+  "tokenContract": "wieler.skahlo.testnet",
+  "raidContract": "raid.wieler.skahlo.testnet",
+  "barbarian": "barbarian.wieler.skahlo.testnet",
+  "explorer": "https://testnet.nearblocks.io"
+}
