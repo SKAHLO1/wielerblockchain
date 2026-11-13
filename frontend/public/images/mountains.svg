@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 260" preserveAspectRatio="xMidYMax slice">
+  <defs>
+    <linearGradient id="m1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f4c8f"/>
+      <stop offset="1" stop-color="#0b1838"/>
+    </linearGradient>
+    <linearGradient id="m2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a2f63"/>
+      <stop offset="1" stop-color="#070f26"/>
+    </linearGradient>
+    <linearGradient id="snow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dbe7ff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#dbe7ff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path d="M0 260 L0 170 L60 120 L110 150 L180 70 L240 130 L300 90 L360 140 L430 60 L500 120 L560 100 L600 130 L600 260 Z" fill="url(#m1)"/>
+  <g fill="url(#snow)" opacity="0.75">
+    <path d="M180 70 L198 94 L188 92 L178 104 L170 90 L162 92 Z"/>
+    <path d="M430 60 L450 86 L438 84 L428 98 L420 84 L410 88 Z"/>
+    <path d="M300 90 L314 108 L304 106 L296 116 L290 104 L284 106 Z"/>
+    <path d="M60 120 L72 136 L64 134 L58 142 L52 134 L46 136 Z"/>
+  </g>
+  <path d="M0 260 L0 210 L80 170 L150 200 L230 150 L310 196 L380 160 L460 200 L530 168 L600 190 L600 260 Z" fill="url(#m2)"/>
+</svg>
