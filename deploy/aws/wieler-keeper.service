@@ -1,0 +1,19 @@
+[Unit]
+Description=WIELER keeper (closes epochs, signs and broadcasts flags)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=wieler
+WorkingDirectory=/opt/wieler/scripts
+EnvironmentFile=/etc/wieler/keeper.env
+ExecStart=/usr/bin/node keeper.mjs
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
