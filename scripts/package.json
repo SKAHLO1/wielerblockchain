@@ -1,0 +1,18 @@
+{
+  "name": "wieler-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "node deploy.mjs",
+    "keeper": "node keeper.mjs",
+    "barbarian": "node barbarian.mjs",
+    "demo": "node demo.mjs"
+  },
+  "dependencies": {
+    "@noble/curves": "1.4.2",
+    "@noble/hashes": "1.4.0",
+    "@scure/base": "1.1.7",
+    "near-api-js": "5.1.1"
+  }
+}
