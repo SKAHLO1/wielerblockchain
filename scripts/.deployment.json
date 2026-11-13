@@ -1,0 +1,26 @@
+{
+  "network": "testnet",
+  "nodeUrl": "https://test.rpc.fastnear.com",
+  "master": "skahlo.testnet",
+  "token": "wieler.skahlo.testnet",
+  "raid": "raid.wieler.skahlo.testnet",
+  "pool": "pool.wieler.skahlo.testnet",
+  "barbarian": "barbarian.wieler.skahlo.testnet",
+  "alice": "alice.wieler.skahlo.testnet",
+  "bob": "bob.wieler.skahlo.testnet",
+  "carol": "carol.wieler.skahlo.testnet",
+  "chains": [
+    {
+      "id": "bitcoin",
+      "address": "tb1q2m3crg9eacml4cfwstk2500w5sw3g3yrycy0vz"
+    },
+    {
+      "id": "ethereum",
+      "address": "0xd4dcb0d441963ba4202888b975fa5ebf9eb2afe1"
+    },
+    {
+      "id": "solana",
+      "address": "BxFsmZLRpqiXhf8Tun851P7iFHrgSxCLhiZFXr72U7BF"
+    }
+  ]
+}
