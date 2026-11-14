@@ -207,3 +207,131 @@ fn evm_signed_tx_hash_is_deterministic() {
     let s = etx.signed(&[0x22; 32], &[0x33; 32], 1);
     assert!(s.len() > u.len());
 }
+
+// ------------------------------------------------------------------ MPC sign requests
+
+fn btc_params() -> TxParams {
+    TxParams::Bitcoin {
+        txid: "a83c2ecd00000000000000000000000000000000000000000000000000000752".into(),
+        vout: 0,
+        value: U64(50_000),
+        fee: U64(500),
+    }
+}
+
+/// A well-formed secp256k1 response in the MPC contract's shape.
+fn ecdsa_sig() -> Value {
+    json!({
+        "scheme": "Secp256k1",
+        "big_r": { "affine_point": format!("02{}", "11".repeat(32)) },
+        "s": { "scalar": "22".repeat(32) },
+        "recovery_id": 0
+    })
+}
+
+/// Creates a bitcoin flag and returns (contract, flag id, time the epoch closed).
+fn with_flag() -> (Contract, u64, u64) {
+    let mut c = setup();
+    stake(&mut c, "alice.test", 1_000 * W, "bitcoin", 1);
+    let t = EPOCH_MS + 1;
+    ctx(acc("keeper.test"), t);
+    let id = c.close_epoch().expect("flag created");
+    (c, id, t)
+}
+
+fn as_self(ts_ms: u64) {
+    ctx("raid.wieler.test".parse().unwrap(), ts_ms);
+}
+
+#[test]
+fn signing_flag_cannot_be_rerequested_before_timeout() {
+    let (mut c, id, t) = with_flag();
+    ctx(acc("keeper.test"), t + 1);
+    let _ = c.request_flag_signature(id, btc_params());
+    assert_eq!(c.get_flag(id).unwrap().status, FlagStatus::Signing);
+    let r = c.get_sign_request(id).unwrap();
+    assert_eq!(r.request_id, 1);
+    assert_eq!(r.retry_after_ms.0, t + 1 + SIGNING_TIMEOUT_MS);
+
+    let early = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx(acc("keeper.test"), t + SIGNING_TIMEOUT_MS - 1);
+        let _ = c.request_flag_signature(id, btc_params());
+    }));
+    assert!(early.is_err());
+}
+
+#[test]
+fn stuck_signing_flag_is_retried_and_stale_callback_ignored() {
+    let (mut c, id, t) = with_flag();
+    ctx(acc("keeper.test"), t + 1);
+    let _ = c.request_flag_signature(id, btc_params());
+
+    // The first callback never landed (e.g. ran out of gas); after the timeout a new
+    // request is allowed and gets a new id.
+    ctx(acc("keeper.test"), t + 1 + SIGNING_TIMEOUT_MS);
+    let _ = c.request_flag_signature(id, btc_params());
+    assert_eq!(c.get_sign_request(id).unwrap().request_id, 2);
+
+    // A late result for request 1 is ignored.
+    as_self(t + 2 + SIGNING_TIMEOUT_MS);
+    assert!(c.on_signature(id, 1, Ok(ecdsa_sig())).is_none());
+    assert_eq!(c.get_flag(id).unwrap().status, FlagStatus::Signing);
+
+    // The result for request 2 is applied.
+    let hash = c.on_signature(id, 2, Ok(ecdsa_sig())).expect("signed");
+    let f = c.get_flag(id).unwrap();
+    assert_eq!(f.status, FlagStatus::Signed);
+    assert_eq!(f.expected_tx_hash.as_deref(), Some(hash.as_str()));
+
+    // And a duplicate delivery of it does nothing further.
+    assert!(c.on_signature(id, 2, Ok(ecdsa_sig())).is_none());
+}
+
+#[test]
+fn malformed_signature_marks_flag_failed_instead_of_panicking() {
+    let (mut c, id, t) = with_flag();
+    ctx(acc("keeper.test"), t + 1);
+    let _ = c.request_flag_signature(id, btc_params());
+    as_self(t + 2);
+    assert!(c.on_signature(id, 1, Ok(json!({ "unexpected": true }))).is_none());
+    let f = c.get_flag(id).unwrap();
+    assert_eq!(f.status, FlagStatus::Failed);
+    assert!(f.error.unwrap().contains("unexpected MPC signature format"));
+
+    // Failed flags can be re-requested at once.
+    ctx(acc("keeper.test"), t + 3);
+    let _ = c.request_flag_signature(id, btc_params());
+    assert_eq!(c.get_sign_request(id).unwrap().request_id, 2);
+}
+
+#[test]
+fn signed_flag_can_be_resigned_with_fresh_params() {
+    let (mut c, id, t) = with_flag();
+    ctx(acc("keeper.test"), t + 1);
+    let _ = c.request_flag_signature(id, btc_params());
+    as_self(t + 2);
+    let first = c.on_signature(id, 1, Ok(ecdsa_sig())).unwrap();
+
+    // Stale (e.g. expired blockhash or spent UTXO): request again with new params.
+    ctx(acc("keeper.test"), t + 3);
+    let fresh = TxParams::Bitcoin {
+        txid: "31d5db7f000000000000000000000000000000000000000000000000000caad0".into(),
+        vout: 1,
+        value: U64(40_000),
+        fee: U64(400),
+    };
+    let _ = c.request_flag_signature(id, fresh);
+    as_self(t + 4);
+    let second = c.on_signature(id, 2, Ok(ecdsa_sig())).unwrap();
+    assert_ne!(first, second);
+    assert_eq!(c.get_flag(id).unwrap().expected_tx_hash.as_deref(), Some(second.as_str()));
+}
+
+#[test]
+fn signature_parsers_reject_bad_shapes() {
+    assert!(parse_ecdsa(&ecdsa_sig()).is_some());
+    assert!(parse_ecdsa(&json!({ "big_r": { "affine_point": "02aa" }, "s": { "scalar": "00" }, "recovery_id": 0 })).is_none());
+    assert!(parse_ed25519(&json!({ "signature": vec![7u8; 64] })).is_some());
+    assert!(parse_ed25519(&json!({ "signature": vec![7u8; 63] })).is_none());
+    assert!(parse_ed25519(&json!({ "signature": [300, 1] })).is_none());
+}

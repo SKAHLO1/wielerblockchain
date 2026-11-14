@@ -28,6 +28,10 @@ const GAS_CALLBACK: Gas = Gas::from_tgas(10);
 const GAS_MPC_SIGN: Gas = Gas::from_tgas(50);
 const GAS_ON_SIGNATURE: Gas = Gas::from_tgas(30);
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
+/// A flag left in `Signing` this long may be re-requested. MPC sign requests time out
+/// after a few minutes, so by then the original request can no longer complete; this is
+/// the escape hatch for a callback that never landed its result (e.g. ran out of gas).
+pub const SIGNING_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 
 #[ext_contract(ext_ft)]
 #[allow(dead_code)]
@@ -218,6 +222,36 @@ pub struct Flag {
     pub explorer_url: Option<String>,
     pub created_ms: U64,
     pub error: Option<String>,
+}
+
+/// Bookkeeping for a flag's latest MPC sign request. Kept in its own raw storage slot,
+/// outside `Flag` and `Contract`, so adding it did not change the stored state layout.
+#[near(serializers = [borsh, json])]
+#[derive(Clone)]
+pub struct SignRequest {
+    /// Increments on every request; only the callback carrying the latest id is applied.
+    pub request_id: u64,
+    pub started_ms: U64,
+}
+
+#[near(serializers = [json])]
+pub struct SignRequestView {
+    pub request_id: u64,
+    pub started_ms: U64,
+    /// When a flag still in `Signing` may be re-requested.
+    pub retry_after_ms: U64,
+}
+
+fn sign_request_key(flag_id: u64) -> Vec<u8> {
+    [b"sigreq".as_slice(), &flag_id.to_le_bytes()].concat()
+}
+
+fn read_sign_request(flag_id: u64) -> Option<SignRequest> {
+    env::storage_read(&sign_request_key(flag_id)).and_then(|b| near_sdk::borsh::from_slice(&b).ok())
+}
+
+fn write_sign_request(flag_id: u64, r: &SignRequest) {
+    env::storage_write(&sign_request_key(flag_id), &near_sdk::borsh::to_vec(r).unwrap());
 }
 
 #[near(serializers = [borsh, json])]
@@ -1010,7 +1044,17 @@ impl Contract {
     pub fn request_flag_signature(&mut self, flag_id: u64, params: TxParams) -> Promise {
         let mut flag = self.flags.get(flag_id as u32).cloned().expect("no flag");
         require!(flag.status != FlagStatus::Broadcast, "flag already broadcast");
-        require!(flag.status != FlagStatus::Signing, "signature already requested");
+        let now_ms = env::block_timestamp_ms();
+        let prev = read_sign_request(flag_id);
+        if flag.status == FlagStatus::Signing {
+            // A flag from before request tracking has no record and counts as long expired.
+            let started = prev.as_ref().map(|r| r.started_ms.0).unwrap_or(0);
+            require!(
+                now_ms >= started.saturating_add(SIGNING_TIMEOUT_MS),
+                "signature already requested; it can be retried after the signing timeout"
+            );
+        }
+        let request_id = prev.map(|r| r.request_id + 1).unwrap_or(1);
         let chain = self.chains.get(&flag.chain).cloned().expect("no chain");
         let memo = flag.memo.as_bytes().to_vec();
         let pk = hex::decode(chain.derived_pubkey.trim_start_matches("0x")).unwrap();
@@ -1056,6 +1100,7 @@ impl Contract {
         flag.payload = Some(hex::encode(&payload));
         flag.error = None;
         self.flags.replace(flag_id as u32, flag);
+        write_sign_request(flag_id, &SignRequest { request_id, started_ms: U64(now_ms) });
 
         let args = json!({
             "request": {
@@ -1069,7 +1114,7 @@ impl Contract {
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_ON_SIGNATURE)
-                    .on_signature(flag_id),
+                    .on_signature(flag_id, request_id),
             )
     }
 
@@ -1103,13 +1148,21 @@ impl Contract {
     }
 
     /// MPC callback: stores the signed transaction and its expected foreign tx hash.
+    /// Results for a superseded request are ignored, and anything unexpected marks the flag
+    /// `Failed` rather than panicking, so the flag never stays stuck in `Signing`.
     #[private]
     pub fn on_signature(
         &mut self,
         flag_id: u64,
+        request_id: u64,
         #[callback_result] signature: Result<Value, PromiseError>,
     ) -> Option<String> {
         let mut flag = self.flags.get(flag_id as u32).cloned().expect("no flag");
+        let latest = read_sign_request(flag_id).map(|r| r.request_id);
+        if latest != Some(request_id) || flag.status != FlagStatus::Signing {
+            log!("flag {}: ignoring result of superseded sign request {}", flag_id, request_id);
+            return None;
+        }
         let chain = self.chains.get(&flag.chain).cloned().expect("no chain");
         let sig = match signature {
             Ok(v) => v,
@@ -1124,25 +1177,30 @@ impl Contract {
         let memo = flag.memo.as_bytes().to_vec();
         let pk = hex::decode(chain.derived_pubkey.trim_start_matches("0x")).unwrap();
 
-        let (signed, hash) = match (params, chain.kind) {
+        let built = match (params, chain.kind) {
             (TxParams::Evm { nonce, max_fee_per_gas, max_priority_fee_per_gas, gas_limit }, ChainKind::Evm) => {
-                let (r, s, v) = parse_ecdsa(&sig);
-                let etx = self.evm_tx(&chain, nonce, max_fee_per_gas.0, max_priority_fee_per_gas.0, gas_limit, memo);
-                let signed = etx.signed(&r, &s, v);
-                let hash = format!("0x{}", hex::encode(env::keccak256_array(&signed)));
-                (signed, hash)
+                parse_ecdsa(&sig).map(|(r, s, v)| {
+                    let etx = self.evm_tx(&chain, nonce, max_fee_per_gas.0, max_priority_fee_per_gas.0, gas_limit, memo);
+                    let signed = etx.signed(&r, &s, v);
+                    let hash = format!("0x{}", hex::encode(env::keccak256_array(&signed)));
+                    (signed, hash)
+                })
             }
-            (TxParams::Bitcoin { txid, vout, value, fee }, ChainKind::Bitcoin) => {
-                let (r, s, _) = parse_ecdsa(&sig);
+            (TxParams::Bitcoin { txid, vout, value, fee }, ChainKind::Bitcoin) => parse_ecdsa(&sig).map(|(r, s, _)| {
                 let btx = self.btc_tx(&pk, &txid, vout, value.0, fee.0, memo);
                 (btx.signed(&r, &s, &pk), hex::encode(btx.txid()))
-            }
-            (TxParams::Solana { .. }, ChainKind::Solana) => {
-                let sig64 = parse_ed25519(&sig);
+            }),
+            (TxParams::Solana { .. }, ChainKind::Solana) => parse_ed25519(&sig).map(|sig64| {
                 let msg = hex::decode(flag.unsigned_tx.as_ref().unwrap()).unwrap();
                 (tx::solana_signed(&msg, &sig64), bs58::encode(sig64).into_string())
-            }
-            _ => env::panic_str("mismatched params"),
+            }),
+            _ => None,
+        };
+        let Some((signed, hash)) = built else {
+            flag.status = FlagStatus::Failed;
+            flag.error = Some("unexpected MPC signature format; retry request_flag_signature".into());
+            self.flags.replace(flag_id as u32, flag);
+            return None;
         };
         flag.status = FlagStatus::Signed;
         flag.signed_tx = Some(hex::encode(&signed));
@@ -1253,6 +1311,15 @@ impl Contract {
         self.flags.get(id as u32).cloned()
     }
 
+    /// The flag's latest MPC sign request, if any.
+    pub fn get_sign_request(&self, flag_id: u64) -> Option<SignRequestView> {
+        read_sign_request(flag_id).map(|r| SignRequestView {
+            request_id: r.request_id,
+            started_ms: r.started_ms,
+            retry_after_ms: U64(r.started_ms.0 + SIGNING_TIMEOUT_MS),
+        })
+    }
+
     /// Newest first.
     pub fn get_flags(&self, from_index: Option<u64>, limit: Option<u64>) -> Vec<Flag> {
         let len = self.flags.len() as u64;
@@ -1338,27 +1405,30 @@ impl Contract {
     }
 }
 
-fn parse_ecdsa(v: &Value) -> ([u8; 32], [u8; 32], u8) {
+/// Parses the MPC's secp256k1 response; None if it is not in the expected shape.
+fn parse_ecdsa(v: &Value) -> Option<([u8; 32], [u8; 32], u8)> {
     // {"scheme":"Secp256k1","big_r":{"affine_point":"02.."},"s":{"scalar":".."},"recovery_id":0}
     let v = v.get("Secp256k1").unwrap_or(v);
-    let big_r = v["big_r"]["affine_point"].as_str().expect("big_r");
-    let s = v["s"]["scalar"].as_str().expect("s");
-    let rid = v["recovery_id"].as_u64().expect("recovery_id") as u8;
-    let big_r = hex::decode(big_r).expect("big_r hex");
-    let r: [u8; 32] = big_r[1..33].try_into().unwrap();
-    (r, parse_hex32(s), rid)
+    let big_r = hex::decode(v["big_r"]["affine_point"].as_str()?).ok()?;
+    let s = hex::decode(v["s"]["scalar"].as_str()?.trim_start_matches("0x")).ok()?;
+    let rid = u8::try_from(v["recovery_id"].as_u64()?).ok()?;
+    if big_r.len() != 33 {
+        return None;
+    }
+    Some((big_r[1..33].try_into().ok()?, s.try_into().ok()?, rid))
 }
 
-fn parse_ed25519(v: &Value) -> [u8; 64] {
+/// Parses the MPC's Ed25519 response; None if it is not in the expected shape.
+fn parse_ed25519(v: &Value) -> Option<[u8; 64]> {
     // {"scheme":"Ed25519","signature":[..64 bytes..]} (also accepts hex)
     let v = v.get("Ed25519").unwrap_or(v);
     let sig = &v["signature"];
     let bytes: Vec<u8> = if let Some(arr) = sig.as_array() {
-        arr.iter().map(|b| b.as_u64().expect("byte") as u8).collect()
+        arr.iter().map(|b| b.as_u64().and_then(|x| u8::try_from(x).ok())).collect::<Option<_>>()?
     } else {
-        hex::decode(sig.as_str().expect("signature")).expect("sig hex")
+        hex::decode(sig.as_str()?).ok()?
     };
-    bytes.try_into().expect("64-byte signature")
+    bytes.try_into().ok()
 }
 
 #[near]
