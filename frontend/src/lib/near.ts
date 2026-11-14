@@ -24,24 +24,46 @@ function decodeResult(bytes: number[]) {
   return text ? JSON.parse(text) : null;
 }
 
+/** Public RPCs tried in order when the configured one fails. Free endpoints rate-limit
+ * per IP, and a throttled response usually lacks CORS headers, so the browser only
+ * reports "Failed to fetch". Falling back keeps the site readable for every visitor. */
+const FALLBACK_RPCS: Record<string, string[]> = {
+  testnet: ['https://near-testnet.drpc.org', 'https://rpc.testnet.near.org'],
+  mainnet: ['https://near.drpc.org', 'https://rpc.mainnet.near.org'],
+};
+const RPCS = [...new Set([CONFIG.nodeUrl, ...(FALLBACK_RPCS[CONFIG.networkId] ?? [])])];
+/** Index of the endpoint that last answered; later calls start there. */
+let rpcIndex = 0;
+
+async function rpcQuery(params: object) {
+  let lastError: unknown;
+  for (let i = 0; i < RPCS.length; i++) {
+    const idx = (rpcIndex + i) % RPCS.length;
+    try {
+      const res = await fetch(RPCS[idx], {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'wieler', method: 'query', params }),
+      });
+      if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+      const json = await res.json();
+      rpcIndex = idx;
+      return json;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+
 export async function view<T = unknown>(contract: string, method: string, args: object = {}): Promise<T> {
-  const res = await fetch(CONFIG.nodeUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 'wieler',
-      method: 'query',
-      params: {
-        request_type: 'call_function',
-        finality: 'optimistic',
-        account_id: contract,
-        method_name: method,
-        args_base64: b64(JSON.stringify(args)),
-      },
-    }),
+  const json = await rpcQuery({
+    request_type: 'call_function',
+    finality: 'optimistic',
+    account_id: contract,
+    method_name: method,
+    args_base64: b64(JSON.stringify(args)),
   });
-  const json = await res.json();
   if (json.error) throw new Error(json.error?.cause?.name || json.error.message || 'RPC error');
   if (json.result?.error) throw new Error(json.result.error);
   return decodeResult(json.result.result) as T;
