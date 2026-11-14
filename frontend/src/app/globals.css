@@ -1472,3 +1472,158 @@ table.t th.num {
   .page-hero-copy h1 { font-size: 21px; }
   .barb-pose { width: 90px; height: 120px; }
 }
+
+/* ------------------------------------------------------------------ intro splash */
+
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px 16px;
+  background: radial-gradient(ellipse at 50% 42%, #10245a 0%, #071029 55%, #03081a 100%);
+  cursor: pointer;
+  /* CSS owns the timing so the overlay clears even before hydration */
+  animation: splash-out 0.5s ease 5s forwards;
+}
+.splash-leaving {
+  animation: splash-out 0.5s ease forwards;
+}
+@keyframes splash-out {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+.splash-figure {
+  position: relative;
+  height: min(58vh, 470px);
+  aspect-ratio: 195 / 355;
+  -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent 97%);
+  mask-image: linear-gradient(180deg, #000 78%, transparent 97%);
+}
+.splash-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.splash-art {
+  opacity: 0.1;
+  filter: brightness(0.35) saturate(0.6);
+  animation: splash-art-in 2.4s ease 1.6s forwards;
+}
+@keyframes splash-art-in {
+  to {
+    opacity: 1;
+    filter: brightness(1) saturate(1);
+  }
+}
+.splash-outline {
+  overflow: visible;
+}
+.splash-outline path {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.splash-trail {
+  stroke: rgba(111, 190, 255, 0.75);
+  stroke-width: 1.6px;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  animation: splash-draw 3.4s cubic-bezier(0.55, 0.1, 0.3, 1) forwards;
+}
+@keyframes splash-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.splash-comet {
+  stroke: #d8f0ff;
+  stroke-width: 3px;
+  stroke-dasharray: 0.07 0.93;
+  stroke-dashoffset: 1;
+  animation: splash-run 1.5s linear infinite;
+}
+.splash-comet-2 {
+  stroke: #7cc4ff;
+  stroke-width: 2.4px;
+  stroke-dasharray: 0.04 0.96;
+  animation-delay: -0.75s;
+}
+@keyframes splash-run {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.splash-word {
+  font-size: clamp(30px, 6vw, 44px);
+  font-weight: 800;
+  letter-spacing: 0.32em;
+  margin-right: -0.32em;
+  color: #eaf0ff;
+  text-shadow: 0 0 18px rgba(79, 163, 255, 0.7);
+  opacity: 0;
+  animation: splash-rise 0.7s ease 0.5s forwards;
+}
+.splash-tag {
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  opacity: 0;
+  animation: splash-rise 0.7s ease 0.8s forwards;
+}
+@keyframes splash-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.splash-bar {
+  width: min(220px, 60vw);
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(79, 141, 255, 0.18);
+  overflow: hidden;
+}
+.splash-bar span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #3b82f6, #9ad4ff);
+  box-shadow: 0 0 10px #4fa3ff;
+  transform-origin: left;
+  transform: scaleX(0);
+  animation: splash-progress 5s linear forwards;
+}
+@keyframes splash-progress {
+  to {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash {
+    animation-delay: 0.8s;
+  }
+  .splash-comet {
+    display: none;
+  }
+  .splash-art,
+  .splash-trail,
+  .splash-word,
+  .splash-tag,
+  .splash-bar span {
+    animation-duration: 0.01s;
+    animation-delay: 0s;
+  }
+}

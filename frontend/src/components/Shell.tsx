@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { DataProvider, useClock, useGame, useWallet, WalletProvider } from '@/lib/providers';
 import { countdown, fmtCompact, toWhole, timeAgo, CONFIG, TGAS } from '@/lib/near';
 import { UiProvider, useUi } from './ui';
+import Splash from './Splash';
 import {
   IconBell,
   IconBook,
@@ -56,6 +57,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   }, [open]);
   return (
     <div className="app">
+      <Splash />
       <Sidebar open={open} />
       {open && <div className="app-sidebar-scrim" onClick={() => setOpen(false)} />}
       <main className="main">
