@@ -98,10 +98,19 @@ async function broadcast(chain, flag) {
     return text.trim();
   }
   const b64 = Buffer.from(hex.decode(raw)).toString('base64');
-  return rpc(env.solanaRpc, 'sendTransaction', [b64, { encoding: 'base64', preflightCommitment: 'confirmed' }]);
+  try {
+    return await rpc(env.solanaRpc, 'sendTransaction', [b64, { encoding: 'base64', preflightCommitment: 'confirmed' }]);
+  } catch (e) {
+    // This exact signed transaction already landed (e.g. the keeper stopped before
+    // confirm_broadcast last time). That is success, not staleness: re-signing here
+    // would put a second flag transaction on Solana.
+    if (/already been processed|AlreadyProcessed/i.test(e.message)) return flag.expected_tx_hash;
+    throw e;
+  }
 }
 
-const stale = (e) => /nonce too low|replacement|bad-txns-inputs|missingorspent|Blockhash not found|already been processed/i.test(e.message);
+// Errors meaning the signed transaction can never land and needs fresh parameters.
+const stale = (e) => /nonce too low|replacement|bad-txns-inputs|missingorspent|Blockhash not found/i.test(e.message);
 
 // ------------------------------------------------------------------ loop
 
