@@ -132,9 +132,16 @@ async function tick() {
   const flags = await view(dep.raid, 'get_flags', { limit: 50 });
   for (const flag of flags.reverse()) {
     const chain = chains[flag.chain];
-    if (!chain || flag.status === 'Broadcast' || flag.status === 'Signing') continue;
+    if (!chain || flag.status === 'Broadcast') continue;
+    if (flag.status === 'Signing') {
+      // Normally the MPC callback resolves this within seconds. If it never landed, the
+      // contract accepts a fresh request once the signing timeout has passed.
+      const req = await view(dep.raid, 'get_sign_request', { flag_id: flag.id }).catch(() => null);
+      if (req && now < Number(req.retry_after_ms)) continue;
+      log(`flag #${flag.id} (${chain.name}) stuck in Signing; requesting a new signature`);
+    }
     try {
-      if (flag.status === 'AwaitingTx' || flag.status === 'Failed') {
+      if (flag.status === 'AwaitingTx' || flag.status === 'Failed' || flag.status === 'Signing') {
         const params =
           chain.kind === 'Evm' ? await evmParams(chain, flag) : chain.kind === 'Bitcoin' ? await btcParams(chain, flag) : await solParams(chain);
         log(`flag #${flag.id} (${chain.name}) → request_flag_signature`, JSON.stringify(params));
