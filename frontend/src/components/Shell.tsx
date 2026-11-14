@@ -48,12 +48,18 @@ function Frame({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const path = usePathname();
   useEffect(() => setOpen(false), [path]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
   return (
     <div className="app">
       <Sidebar open={open} />
       {open && <div className="app-sidebar-scrim" onClick={() => setOpen(false)} />}
       <main className="main">
-        <Header onMenu={() => setOpen((o) => !o)} />
+        <Header open={open} onMenu={() => setOpen((o) => !o)} />
         <DeployNotice />
         {children}
       </main>
@@ -143,7 +149,7 @@ function SupplyWidget() {
   );
 }
 
-function Header({ onMenu }: { onMenu: () => void }) {
+function Header({ open, onMenu }: { open: boolean; onMenu: () => void }) {
   useClock();
   const game = useGame();
   const { accountId, signIn, signOut, call } = useWallet();
@@ -185,7 +191,7 @@ function Header({ onMenu }: { onMenu: () => void }) {
 
   return (
     <header className="header">
-      <button className="icon-btn menu-btn" onClick={onMenu} aria-label="Menu">
+      <button className="icon-btn menu-btn" onClick={onMenu} aria-label="Menu" aria-expanded={open}>
         <IconMenu />
       </button>
       <div className="hero-title">
